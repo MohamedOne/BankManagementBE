@@ -2,10 +2,14 @@ package com.example.bankmanagement.BankApp.controllers;
 
 import com.example.bankmanagement.BankApp.entities.Account;
 import com.example.bankmanagement.BankApp.entities.Transaction;
+import com.example.bankmanagement.BankApp.exceptions.ExceededDailyLimitException;
+import com.example.bankmanagement.BankApp.exceptions.InsufficientFundsException;
 import com.example.bankmanagement.BankApp.models.TransactionSubtype;
 import com.example.bankmanagement.BankApp.models.TransactionType;
 import com.example.bankmanagement.BankApp.repositories.AccountRepository;
 import com.example.bankmanagement.BankApp.repositories.TransactionRepository;
+import com.example.bankmanagement.BankApp.services.AccountService;
+import com.example.bankmanagement.BankApp.services.TransactionService;
 import com.example.bankmanagement.BankApp.utilities.Generator;
 import com.example.bankmanagement.BankApp.utilities.TransactionVerification;
 import org.apache.coyote.Response;
@@ -22,26 +26,25 @@ import java.util.ArrayList;
 import java.util.List;
 
 @RestController
+@CrossOrigin(origins = "http://localhost:3000")
 public class TransactionController {
 
     @Autowired
-    private TransactionRepository transactionRepository;
+    private TransactionService transactionService;
 
     @Autowired
-    private AccountRepository accountRepository;
+    private AccountService accountService;
 
     @GetMapping("/transactions")
     ResponseEntity<List<Transaction>> getAllTransactions() {
-        List<Transaction> allTransactions = new ArrayList<>();
-        transactionRepository.findAll().forEach(allTransactions::add);
 
+        List<Transaction> allTransactions = transactionService.getAllTransactions();
         return new ResponseEntity<List<Transaction>>(allTransactions, HttpStatus.OK);
     }
 
     @GetMapping("/transactions/recents/{transactionAccountNumber}")
     ResponseEntity<List<Transaction>> getLastFiveTransactions(@PathVariable long transactionAccountNumber) {
-        List<Transaction> allTransactions = new ArrayList<>();
-        transactionRepository.fetchTransactionListByAcctNumber(transactionAccountNumber).forEach(allTransactions::add);
+        List<Transaction> allTransactions = transactionService.getAllTransactions();
 
         int len = allTransactions.size();
         List<Transaction> lastFiveTransactions = new ArrayList<>();
@@ -55,8 +58,7 @@ public class TransactionController {
     @GetMapping("/transactions/day/{transactionAccountNumber}/{date}")
     ResponseEntity<List<Transaction>> getDaysTransactions(@PathVariable long transactionAccountNumber,
                                                           @PathVariable @DateTimeFormat(pattern = "yyyy-MM-DD") LocalDate date) {
-        List<Transaction> allTransactions = new ArrayList<>();
-        transactionRepository.fetchTransactionListByAcctNumber(transactionAccountNumber).forEach(allTransactions::add);
+        List<Transaction> allTransactions = transactionService.getAllTransactions();
 
         List<Transaction> userTransactionsToday = new ArrayList<>();
 
@@ -76,7 +78,7 @@ public class TransactionController {
 
 
     @PostMapping("/transactions")
-    ResponseEntity postNewTransaction(@RequestBody Transaction transaction) {
+    ResponseEntity postNewTransaction(@RequestBody Transaction transaction) throws ExceededDailyLimitException {
         transaction.setTransactionRefNumber(Generator.generateTransactionReferenceNumber());
         transaction.setTransactionSubmitTime(Generator.generateCurrentTime());
 
@@ -84,7 +86,7 @@ public class TransactionController {
         if(TransactionVerification.verifySufficientFunds(transaction.getTransactionAccountNumberFrom(), transaction.getTransactionAmount())
                 && TransactionVerification.verifyThatAccountHasNotExceededDailyLimit(transaction.getTransactionAccountNumberFrom())) {
 
-            return new ResponseEntity<>(HttpStatus.NOT_ACCEPTABLE);
+            throw new ExceededDailyLimitException();
         }
         //User is depositing money to own account
         if(transaction.getTransactionType() == TransactionType.DEBIT
@@ -92,10 +94,10 @@ public class TransactionController {
             && transaction.getTransactionSubtype() == TransactionSubtype.CASH
             && transaction.getTransactionAmount() > 0) {
 
-            Account account = accountRepository.queryByAccountNumber(transaction.getTransactionAccountNumberFrom());
+            Account account = accountService.queryByAccountNumber(transaction.getTransactionAccountNumberFrom());
             account.setCurrentBalance(account.getCurrentBalance() + transaction.getTransactionAmount());
-            accountRepository.save(account);
-            transactionRepository.save(transaction);
+            accountService.saveAccount(account);
+            transactionService.saveTransaction(transaction);
 
             return new ResponseEntity(HttpStatus.ACCEPTED);
         }
@@ -105,20 +107,20 @@ public class TransactionController {
                 && transaction.getTransactionSubtype() == TransactionSubtype.CASH
                 && transaction.getTransactionAmount() > 0) {
 
-            Account account = accountRepository.queryByAccountNumber(transaction.getTransactionAccountNumberFrom());
+            Account account = accountService.queryByAccountNumber(transaction.getTransactionAccountNumberFrom());
             account.setCurrentBalance(account.getCurrentBalance() - transaction.getTransactionAmount());
-            accountRepository.save(account);
-            transactionRepository.save(transaction);
+            accountService.saveAccount(account);
+            transactionService.saveTransaction(transaction);
 
             return new ResponseEntity<>(HttpStatus.ACCEPTED);
         }
 
-        transactionRepository.save(transaction);
+        transactionService.saveTransaction(transaction);
         return new ResponseEntity(HttpStatus.ACCEPTED);
     }
 
     @PostMapping("/transactions/transfers")
-    ResponseEntity transferFunds(@RequestBody Transaction transaction) {
+    ResponseEntity transferFunds(@RequestBody Transaction transaction) throws InsufficientFundsException {
         transaction.setTransactionRefNumber(Generator.generateTransactionReferenceNumber());
         transaction.setTransactionSubmitTime(Generator.generateCurrentTime());
 
@@ -126,20 +128,20 @@ public class TransactionController {
         if(TransactionVerification.verifySufficientFunds(transaction.getTransactionAccountNumberFrom(), transaction.getTransactionAmount())
                 && TransactionVerification.verifyThatAccountHasNotExceededDailyLimit(transaction.getTransactionAccountNumberFrom())) {
 
-            return new ResponseEntity<>(HttpStatus.NOT_ACCEPTABLE);
+            throw new InsufficientFundsException();
         }
 
         if(transaction.getTransactionSubtype() == TransactionSubtype.TRANSFER
             && transaction.getTransactionAccountNumberTo() != 0) {
 
-            Account payer = accountRepository.queryByAccountNumber(transaction.getTransactionAccountNumberFrom());
-            Account reciever = accountRepository.queryByAccountNumber(transaction.getTransactionAccountNumberTo());
+            Account payer = accountService.queryByAccountNumber(transaction.getTransactionAccountNumberFrom());
+            Account reciever = accountService.queryByAccountNumber(transaction.getTransactionAccountNumberTo());
 
             payer.setCurrentBalance(payer.getCurrentBalance() - transaction.getTransactionAmount());
             reciever.setCurrentBalance(reciever.getCurrentBalance() + transaction.getTransactionAmount());
 
-            accountRepository.save(payer); accountRepository.save(reciever);
-            transactionRepository.save(transaction);
+            accountService.saveAccount(payer); accountService.saveAccount(reciever);
+            transactionService.saveTransaction(transaction);
 
             return new ResponseEntity(HttpStatus.ACCEPTED);
         }

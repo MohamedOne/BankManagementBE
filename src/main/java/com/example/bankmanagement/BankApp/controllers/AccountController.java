@@ -1,7 +1,9 @@
 package com.example.bankmanagement.BankApp.controllers;
 
 import com.example.bankmanagement.BankApp.entities.Account;
+import com.example.bankmanagement.BankApp.exceptions.AccountNotFoundException;
 import com.example.bankmanagement.BankApp.repositories.AccountRepository;
+import com.example.bankmanagement.BankApp.services.AccountService;
 import com.example.bankmanagement.BankApp.utilities.Generator;
 import org.apache.coyote.Response;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,15 +15,20 @@ import java.util.ArrayList;
 import java.util.List;
 
 @RestController
+@CrossOrigin(origins = "http://localhost:3000")
 public class AccountController {
 
     @Autowired
     private AccountRepository accountRepository;
 
+    @Autowired
+    private AccountService accountService;
+
     @GetMapping("/accounts")
-    ResponseEntity<List<Account>> getAllAccounts() {
-        List<Account> allAccounts = new ArrayList<>();
-        accountRepository.findAll().forEach(allAccounts::add);
+    ResponseEntity<List<Account>> getAllAccounts() throws AccountNotFoundException{
+        List<Account> allAccounts = accountService.getAllAccounts();
+
+        if(allAccounts.size() < 1) { throw new AccountNotFoundException(); }
 
         return new ResponseEntity<List<Account>>(allAccounts, HttpStatus.OK);
     }
@@ -31,14 +38,20 @@ public class AccountController {
         account.setAccountNumber(Generator.generateAccountNumber());
         account.setCurrentBalance(0);
 
-        accountRepository.save(account);
+        accountService.saveAccount(account);
         return new ResponseEntity(HttpStatus.ACCEPTED);
     }
 
     @GetMapping("/accounts/{customerID}")
-    ResponseEntity<List<Account>> getAllAccountsByID(@PathVariable long customerID) {
+    ResponseEntity<List<Account>> getAllAccountsByID(@PathVariable long customerID) throws AccountNotFoundException {
         List<Account> accounts = new ArrayList<>();
-        accountRepository.queryByCustomerID(customerID).forEach(accounts::add);
+
+
+            accountService.queryByCustomerID(customerID).forEach(accounts::add);
+
+            if (accounts.size() < 1) {
+                throw new AccountNotFoundException();
+            }
 
         return new ResponseEntity<List<Account>>(accounts, HttpStatus.OK);
     }

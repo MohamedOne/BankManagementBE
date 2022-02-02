@@ -14,5 +14,6 @@ public class Account {
     private long _internalReference;
     private long accountNumber;
     private long customerID;
+    //Add entity relationships
     private double currentBalance;
 }
